@@ -29,6 +29,8 @@ dim_vendedor ──────────┤
 dim_region ────────────┤
 dim_categoria ─────────┘
 ```
+<img width="650" height="490" alt="image" src="https://github.com/user-attachments/assets/0db57c05-83dc-47a3-98ed-db89b7c7e1ee" />
+
 
 ### Tablas del Data Warehouse
 
@@ -120,50 +122,11 @@ Mapa de Colombia por ciudad, segmentación de clientes, alerta de clientes en ri
 
 ---
 
-## 🚀 Cómo Usar el Proyecto
-
-```bash
-# 1. Clonar el repositorio
-git clone https://github.com/ricardosequeda/retailbi-dashboard
-cd retailbi-dashboard
-
-# 2. Instalar dependencias Python
-pip install pandas numpy
-
-# 3. Generar el Data Warehouse
-python generar_dw.py
-# Genera 7 archivos CSV en la carpeta ./data/
-
-# 4. Abrir Power BI Desktop
-# 5. Seguir la guía paso a paso en guia_power_bi.md
-# 6. Importar las medidas DAX desde medidas_dax.dax
-```
 
 ### Requisitos
 - Python 3.10+
 - Power BI Desktop (gratuito) — [descargar](https://powerbi.microsoft.com/desktop)
 
----
-
-## 📁 Estructura del Proyecto
-
-```
-retailbi-dashboard/
-│
-├── generar_dw.py          # Generador del Data Warehouse (Python)
-├── medidas_dax.dax        # 40+ medidas DAX comentadas y organizadas
-├── guia_power_bi.md       # Guía paso a paso de implementación
-├── README.md
-│
-└── data/                  # Generado al ejecutar generar_dw.py
-    ├── dim_tiempo.csv
-    ├── dim_categoria.csv
-    ├── dim_producto.csv
-    ├── dim_cliente.csv
-    ├── dim_vendedor.csv
-    ├── dim_region.csv
-    └── fact_ventas.csv
-```
 
 ---
 
