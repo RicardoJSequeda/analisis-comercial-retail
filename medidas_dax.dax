@@ -1,0 +1,452 @@
+# ══════════════════════════════════════════════════════════════════
+# RetailBI — Medidas DAX Avanzadas
+# Power BI | Buenas prácticas | Nivel Avanzado
+#
+# Convenciones aplicadas:
+#   • Tabla de medidas separada: [_Medidas]
+#   • Prefijos por categoría: [💰] revenue, [📦] volumen,
+#     [📈] crecimiento, [🏆] ranking, [👥] clientes, [🎯] metas
+#   • Formato: COP #,##0 para montos, 0.0% para porcentajes
+#   • DIVIDE() en lugar de "/" para evitar errores de división
+#   • VAR + RETURN para legibilidad y rendimiento
+#   • CALCULATE() con modificadores explícitos
+# ══════════════════════════════════════════════════════════════════
+
+
+# ── BLOQUE 1: MEDIDAS BASE ─────────────────────────────────────────
+
+# Revenue total del período seleccionado
+[💰 Revenue] =
+SUM(fact_ventas[ingreso_cop])
+
+# Costo total
+[💰 Costo Total] =
+SUM(fact_ventas[costo_cop])
+
+# Margen bruto en pesos
+[💰 Margen Bruto COP] =
+SUM(fact_ventas[margen_cop])
+
+# Margen bruto en porcentaje
+[💰 Margen Bruto %] =
+DIVIDE(
+    [💰 Margen Bruto COP],
+    [💰 Revenue],
+    0
+)
+
+# Cantidad total de unidades vendidas
+[📦 Unidades Vendidas] =
+SUM(fact_ventas[cantidad])
+
+# Número de transacciones únicas
+[📦 # Transacciones] =
+COUNTROWS(fact_ventas)
+
+# Ticket promedio por transacción
+[💰 Ticket Promedio] =
+DIVIDE(
+    [💰 Revenue],
+    [📦 # Transacciones],
+    0
+)
+
+# Precio promedio ponderado por unidad
+[💰 Precio Promedio / Unidad] =
+DIVIDE(
+    [💰 Revenue],
+    [📦 Unidades Vendidas],
+    0
+)
+
+# Descuento promedio aplicado
+[💰 Descuento Promedio %] =
+AVERAGEX(
+    fact_ventas,
+    fact_ventas[descuento_pct]
+)
+
+# Revenue por unidad de tiempo (densidad)
+[💰 Revenue / Día] =
+DIVIDE(
+    [💰 Revenue],
+    DISTINCTCOUNT(fact_ventas[fecha_id]),
+    0
+)
+
+
+# ── BLOQUE 2: INTELIGENCIA TEMPORAL ───────────────────────────────
+
+# Revenue acumulado en el año (Year-to-Date)
+[📈 Revenue YTD] =
+TOTALYTD(
+    [💰 Revenue],
+    dim_tiempo[fecha]
+)
+
+# Revenue acumulado en el mes (Month-to-Date)
+[📈 Revenue MTD] =
+TOTALMTD(
+    [💰 Revenue],
+    dim_tiempo[fecha]
+)
+
+# Revenue acumulado en el trimestre (Quarter-to-Date)
+[📈 Revenue QTD] =
+TOTALQTD(
+    [💰 Revenue],
+    dim_tiempo[fecha]
+)
+
+# Revenue del mismo período del año anterior
+[📈 Revenue Año Anterior] =
+CALCULATE(
+    [💰 Revenue],
+    SAMEPERIODLASTYEAR(dim_tiempo[fecha])
+)
+
+# Revenue YTD del año anterior (para comparar YTD vs YTD)
+[📈 Revenue YTD Año Anterior] =
+CALCULATE(
+    [📈 Revenue YTD],
+    SAMEPERIODLASTYEAR(dim_tiempo[fecha])
+)
+
+# Variación Year-over-Year en pesos
+[📈 YoY Revenue COP] =
+[💰 Revenue] - [📈 Revenue Año Anterior]
+
+# Variación Year-over-Year en porcentaje
+[📈 YoY Revenue %] =
+DIVIDE(
+    [📈 YoY Revenue COP],
+    [📈 Revenue Año Anterior],
+    BLANK()
+)
+
+# Revenue del mes anterior
+[📈 Revenue Mes Anterior] =
+CALCULATE(
+    [💰 Revenue],
+    PREVIOUSMONTH(dim_tiempo[fecha])
+)
+
+# Variación Month-over-Month
+[📈 MoM Revenue %] =
+DIVIDE(
+    [💰 Revenue] - [📈 Revenue Mes Anterior],
+    [📈 Revenue Mes Anterior],
+    BLANK()
+)
+
+# Media móvil de 3 meses (suaviza estacionalidad)
+[📈 Revenue MA3] =
+VAR _meses3 = DATESINPERIOD(
+    dim_tiempo[fecha],
+    LASTDATE(dim_tiempo[fecha]),
+    -3,
+    MONTH
+)
+RETURN
+CALCULATE(
+    AVERAGEX(
+        SUMMARIZE(fact_ventas, dim_tiempo[anio_mes], "rev_mes", [💰 Revenue]),
+        [rev_mes]
+    ),
+    _meses3
+)
+
+# Acumulado rolling 12 meses
+[📈 Revenue Rolling 12M] =
+CALCULATE(
+    [💰 Revenue],
+    DATESINPERIOD(
+        dim_tiempo[fecha],
+        LASTDATE(dim_tiempo[fecha]),
+        -12,
+        MONTH
+    )
+)
+
+# Revenue acumulado (running total ordenado por fecha)
+[📈 Revenue Acumulado] =
+CALCULATE(
+    [💰 Revenue],
+    FILTER(
+        ALL(dim_tiempo[fecha]),
+        dim_tiempo[fecha] <= MAX(dim_tiempo[fecha])
+    )
+)
+
+
+# ── BLOQUE 3: ANÁLISIS DE PRODUCTOS ───────────────────────────────
+
+# Revenue del producto TOP 1 en el contexto actual
+[🏆 Revenue Top Producto] =
+MAXX(
+    TOPN(1, VALUES(dim_producto[nombre]), [💰 Revenue]),
+    [💰 Revenue]
+)
+
+# Ranking de producto por revenue (sin ties)
+[🏆 Rank Producto Revenue] =
+VAR _rev = [💰 Revenue]
+RETURN
+IF(
+    _rev > 0,
+    RANKX(
+        ALLSELECTED(dim_producto[nombre]),
+        [💰 Revenue],
+        ,
+        DESC,
+        SKIP
+    ),
+    BLANK()
+)
+
+# Indicador ABC por revenue (A=top 20% productos → 80% revenue)
+[🏆 Clasificación ABC] =
+VAR _rev_producto = [💰 Revenue]
+VAR _rev_total    = CALCULATE([💰 Revenue], ALLSELECTED(dim_producto))
+VAR _rank         = [🏆 Rank Producto Revenue]
+VAR _total_prods  = CALCULATE(DISTINCTCOUNT(dim_producto[producto_id]), ALLSELECTED(dim_producto))
+VAR _pct_rank     = DIVIDE(_rank, _total_prods)
+RETURN
+SWITCH(
+    TRUE(),
+    _pct_rank <= 0.20, "A — Alto valor",
+    _pct_rank <= 0.50, "B — Valor medio",
+    "C — Bajo valor"
+)
+
+# Participación de mercado del producto / categoría
+[🏆 Market Share %] =
+DIVIDE(
+    [💰 Revenue],
+    CALCULATE([💰 Revenue], ALLSELECTED(dim_producto)),
+    0
+)
+
+# Contribución al margen total
+[🏆 Contribución Margen %] =
+DIVIDE(
+    [💰 Margen Bruto COP],
+    CALCULATE([💰 Margen Bruto COP], ALLSELECTED()),
+    0
+)
+
+# Revenue por SKU activo (productividad del portafolio)
+[💰 Revenue / SKU Activo] =
+DIVIDE(
+    [💰 Revenue],
+    CALCULATE(
+        COUNTROWS(dim_producto),
+        dim_producto[activo] = TRUE()
+    ),
+    0
+)
+
+
+# ── BLOQUE 4: ANÁLISIS DE CLIENTES ────────────────────────────────
+
+# Clientes únicos que compraron en el período
+[👥 Clientes Activos] =
+DISTINCTCOUNT(fact_ventas[cliente_id])
+
+# Clientes nuevos: primera compra dentro del período seleccionado
+[👥 Clientes Nuevos] =
+VAR _periodo = VALUES(dim_tiempo[fecha])
+RETURN
+CALCULATE(
+    DISTINCTCOUNT(fact_ventas[cliente_id]),
+    FILTER(
+        ALL(fact_ventas),
+        VAR _primera = CALCULATE(
+            MIN(dim_tiempo[fecha]),
+            RELATEDTABLE(dim_tiempo),
+            ALL(dim_tiempo)
+        )
+        RETURN _primera >= MIN(_periodo) && _primera <= MAX(_periodo)
+    )
+)
+
+# Revenue promedio por cliente (ARPC)
+[👥 Revenue por Cliente] =
+DIVIDE(
+    [💰 Revenue],
+    [👥 Clientes Activos],
+    0
+)
+
+# Frecuencia promedio de compra (transacciones por cliente)
+[👥 Frecuencia Compra] =
+DIVIDE(
+    [📦 # Transacciones],
+    [👥 Clientes Activos],
+    0
+)
+
+# Clientes en riesgo: sin compra en últimos 90 días
+[👥 Clientes en Riesgo] =
+VAR _hoy        = MAX(dim_tiempo[fecha])
+VAR _corte      = _hoy - 90
+RETURN
+CALCULATE(
+    DISTINCTCOUNT(fact_ventas[cliente_id]),
+    FILTER(
+        SUMMARIZE(
+            fact_ventas,
+            fact_ventas[cliente_id],
+            "ultima_compra", MAX(dim_tiempo[fecha])
+        ),
+        [ultima_compra] < _corte
+    )
+)
+
+# Revenue del segmento Premium como % del total
+[👥 Revenue Segmento Premium %] =
+DIVIDE(
+    CALCULATE([💰 Revenue], dim_cliente[segmento] = "Premium"),
+    CALCULATE([💰 Revenue], ALL(dim_cliente[segmento])),
+    0
+)
+
+
+# ── BLOQUE 5: ANÁLISIS DE VENDEDORES ──────────────────────────────
+
+# Cumplimiento de meta mensual del vendedor
+[🎯 Cumplimiento Meta %] =
+VAR _revenue_vnd = [💰 Revenue]
+VAR _meta        = AVERAGE(dim_vendedor[meta_mensual_cop])
+RETURN
+DIVIDE(_revenue_vnd, _meta, 0)
+
+# Ranking de vendedores por revenue
+[🏆 Rank Vendedor] =
+VAR _rev = [💰 Revenue]
+RETURN
+IF(
+    _rev > 0,
+    RANKX(
+        ALLSELECTED(dim_vendedor[nombre]),
+        [💰 Revenue],
+        ,
+        DESC,
+        DENSE
+    ),
+    BLANK()
+)
+
+# Revenue del vendedor TOP 1
+[🏆 Revenue Mejor Vendedor] =
+MAXX(
+    TOPN(1, VALUES(dim_vendedor[nombre]), [💰 Revenue]),
+    [💰 Revenue]
+)
+
+# Brecha vs mejor vendedor
+[🏆 Brecha vs Top Vendedor] =
+[💰 Revenue] - [🏆 Revenue Mejor Vendedor]
+
+
+# ── BLOQUE 6: ANÁLISIS REGIONAL ───────────────────────────────────
+
+# Participación de cada región en el revenue total
+[🏆 Market Share Región %] =
+DIVIDE(
+    [💰 Revenue],
+    CALCULATE([💰 Revenue], ALL(dim_region)),
+    0
+)
+
+# Revenue por habitante (normaliza por tamaño de mercado)
+[💰 Revenue per Cápita] =
+DIVIDE(
+    [💰 Revenue],
+    AVERAGE(dim_region[poblacion]),
+    0
+)
+
+# Zona con mayor revenue (texto para card KPI)
+[🏆 Zona Top] =
+FIRSTNONBLANK(
+    TOPN(1,
+        SUMMARIZE(dim_region, dim_region[zona], "rev", [💰 Revenue]),
+        [rev]
+    ),
+    1
+)
+
+
+# ── BLOQUE 7: METAS Y SEMÁFOROS ───────────────────────────────────
+
+# Color de semáforo para tarjetas KPI (usa en formato condicional)
+[🎯 Color Cumplimiento] =
+VAR _pct = [🎯 Cumplimiento Meta %]
+RETURN
+SWITCH(
+    TRUE(),
+    _pct >= 1.00, "Verde",
+    _pct >= 0.80, "Amarillo",
+    "Rojo"
+)
+
+# Icono de tendencia YoY (para columna calculada o medida)
+[📈 Icono Tendencia YoY] =
+VAR _yoy = [📈 YoY Revenue %]
+RETURN
+SWITCH(
+    TRUE(),
+    ISBLANK(_yoy),           "—",
+    _yoy > 0.10,             "▲▲",
+    _yoy > 0,                "▲",
+    _yoy > -0.10,            "▼",
+                              "▼▼"
+)
+
+# Días restantes en el mes (para proyecciones)
+[🎯 Días Restantes Mes] =
+VAR _ultimo_dia = EOMONTH(TODAY(), 0)
+RETURN
+_ultimo_dia - TODAY()
+
+# Proyección de revenue al cierre del mes (basada en ritmo actual)
+[🎯 Revenue Proyectado Mes] =
+VAR _mtd        = [📈 Revenue MTD]
+VAR _dias_trans = DAY(TODAY())
+VAR _dias_mes   = DAY(EOMONTH(TODAY(), 0))
+RETURN
+DIVIDE(_mtd * _dias_mes, _dias_trans, 0)
+
+
+# ══════════════════════════════════════════════════════════════════
+# COLUMNAS CALCULADAS (van en las tablas, no en [_Medidas])
+# ══════════════════════════════════════════════════════════════════
+
+# En dim_tiempo — Etiqueta mes-año para eje X de gráficas
+[Etiqueta Mes] =
+FORMAT(dim_tiempo[fecha], "MMM YYYY")
+
+# En dim_tiempo — Semana del año con año para ordenar
+[Etiqueta Semana] =
+"S" & FORMAT(dim_tiempo[semana_anio], "00") & " " & dim_tiempo[anio]
+
+# En dim_producto — Grupo de precio para segmentación
+[Rango Precio] =
+SWITCH(
+    TRUE(),
+    dim_producto[precio_lista_cop] < 50000,    "Económico (<50k)",
+    dim_producto[precio_lista_cop] < 200000,   "Medio (50k–200k)",
+    dim_producto[precio_lista_cop] < 1000000,  "Alto (200k–1M)",
+                                                "Premium (>1M)"
+)
+
+# En fact_ventas — Clasificación de descuento aplicado
+[Nivel Descuento] =
+SWITCH(
+    TRUE(),
+    fact_ventas[descuento_pct] = 0,          "Sin descuento",
+    fact_ventas[descuento_pct] <= 0.10,      "Descuento bajo (≤10%)",
+    fact_ventas[descuento_pct] <= 0.20,      "Descuento medio (≤20%)",
+                                              "Descuento alto (>20%)"
+)
